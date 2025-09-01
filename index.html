@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Octo Shared Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet & Geocoder -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+
+  <style>
+    :root{--panel:#11192b;--ink:#e7eefc;--ring:0 0 0 3px rgba(122,162,255,.35)}
+    *{box-sizing:border-box} html,body{height:100%}
+    body{
+      margin:0;height:100%;
+      background:#ef5f00;
+      color:var(--ink);
+      font:16px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji";
+      display:flex;flex-direction:column;gap:12px
+    }
+
+    header{
+      padding:14px clamp(14px,3vw,24px) 0;
+      display:flex;align-items:center;gap:12px;flex-wrap:wrap
+    }
+    .title{margin:0;display:flex;align-items:center;gap:10px;font-size:clamp(18px,2.4vw,24px)}
+    .logo-img{height:48px;width:auto;border-radius:8px}
+    .spacer{flex:1}
+
+    .btn{
+      appearance:none;border:0;outline:0;cursor:pointer;
+      padding:12px 16px;border-radius:14px;
+      background:linear-gradient(180deg,#1a2440,#131d35);
+      color:var(--ink);font-weight:700;font-size:16px;line-height:1;
+      display:inline-flex;align-items:center;gap:10px;
+      box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 10px 30px rgba(0,0,0,.25)
+    }
+    .btn-lg{ padding:14px 18px; font-size:17px; min-height:50px }
+    .btn:focus-visible{box-shadow:var(--ring)}
+
+    .wrap{
+      position:relative;flex:1;
+      margin:0 clamp(14px,3vw,24px) clamp(14px,3vw,24px);
+      border-radius:20px;overflow:hidden;
+      border:3px solid #ffffff;
+      background:rgba(0,0,0,.15)
+    }
+    #map{width:100%;height:100%}
+
+    .leaflet-control{filter:drop-shadow(0 4px 16px rgba(0,0,0,.35))}
+    .leaflet-control-geocoder{max-width:360px}
+    .leaflet-control-geocoder-form input{border-radius:10px!important}
+
+    .sticker-wrapper{background:transparent;border:none}
+    .sticker-img{width:56px;height:56px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
+
+    .leaflet-popup.name-popup .leaflet-popup-content-wrapper{
+      background:linear-gradient(180deg,#162445,#0f1c36);
+      color:#eaf3ff;border:1px solid #223150;border-radius:999px;
+      box-shadow:0 10px 20px rgba(0,0,0,.28)
+    }
+    .leaflet-popup.name-popup .leaflet-popup-content{margin:8px 12px;font-weight:700;white-space:nowrap;font-size:14px}
+    .leaflet-popup.name-popup .leaflet-popup-tip{background:#162445;border:1px solid #223150}
+    .name-link{ color:#eaf3ff; text-decoration:none; display:inline-block; }
+    .name-link:hover{ text-decoration:underline; }
+
+    .toolbar{
+      position:absolute;left:14px;bottom:14px;z-index:1001;display:flex;gap:10px;flex-wrap:wrap
+    }
+    .small{padding:8px 12px;border-radius:12px;font-size:14px;background:#0f1628;border:1px solid #223150;color:var(--ink);cursor:pointer}
+    .small.alt{background:#1d2a4a;border-color:#35507e}
+    .small.warn{background:#5a1e1e;border-color:#a13c3c}
+
+    @media (max-width:900px){
+      header{gap:8px}
+      .title{order:1}
+      .spacer{order:2}
+      .right-controls{order:3}
+    }
+
+    .banner{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;background:#0f1628;border:1px solid #223150;padding:10px 14px;border-radius:12px;font-size:14px;color:#cfe0ff;z-index:2000;display:none}
+    .banner.show{display:block}
+    .loading{
+      position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.35);backdrop-filter:blur(2px);color:#fff;font-weight:700;z-index:3000
+    }
+    .loading.hidden{display:none}
+  </style>
+</head>
+<body>
+  <header>
+    <h1 class="title">
+      <img src="octo.svg" alt="Octo" class="logo-img">
+      Octo Shared Map
+    </h1>
+
+    <div class="spacer"></div>
+    <div class="right-controls">
+      <button id="locateBtn" class="btn btn-lg" type="button">📍 Locate me</button>
+      <button id="helpBtnHeader" class="btn btn-lg" type="button">Help</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <button id="resetBtn" class="small" type="button">Reset (local only)</button>
+      <button id="replaceBtn" class="small alt" type="button" title="Replace your pin">Replace my pin</button>
+      <button id="adminBtn" class="small alt" type="button" title="Admin sign-in/out">Admin</button>
+      <button id="wipeBtn" class="small warn" type="button" style="display:none" title="Delete ALL pins">Global reset</button>
+    </div>
+    <div id="map" aria-label="Interactive real-world street map"></div>
+  </div>
+
+  <div id="banner" class="banner"></div>
+  <div id="loading" class="loading">Loading map data…</div>
+
+  <dialog id="helpDialog">
+    <form method="dialog" style="max-width:560px">
+      <p><strong>How it works</strong></p>
+      <ol>
+        <li>Click the map (on land) or use <em>Locate me</em>.</li>
+        <li>Enter your X handle, then press <em>Enter</em> or click <em>Add</em>.</li>
+        <li>The marker shows <code>{handle} octo lives in {CITY}</code>. Clicking it opens your X profile.</li>
+      </ol>
+      <div style="margin-top:10px; text-align:right">
+        <button class="small" value="ok" type="submit" autofocus>Got it</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Leaflet & Geocoder -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+  <!-- TopoJSON + Turf -->
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+    import {
+      getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, serverTimestamp, writeBatch
+    } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
+    import {
+      getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+
+    /* ================= Firebase config ================= */
+    const firebaseConfig = {
+      apiKey:     "AIzaSyA3iDfLssQf7vbafMP1zEb1xnixhvKIM60",
+      authDomain: "octo-map-d9c71.firebaseapp.com",
+      projectId:  "octo-map-d9c71",
+    };
+    const ADMIN_UID = "tX5IMFy1xkfaik9qgAl3ea0yW7z1";  // <-- YOUR ADMIN UID
+    /* =================================================== */
+
+    // DOM helpers
+    const $ = (s) => document.querySelector(s);
+    const banner   = $('#banner');
+    const loading  = $('#loading');
+    const helpDialog = $('#helpDialog');
+    const helpBtnHeader = $('#helpBtnHeader');
+    const locateBtn = $('#locateBtn');
+    const resetBtn = $('#resetBtn');
+    const replaceBtn = $('#replaceBtn');
+    const adminBtn = $('#adminBtn');
+    const wipeBtn = $('#wipeBtn');
+
+    function showBanner(msg){
+      banner.textContent = msg || "Notice";
+      banner.classList.add('show');
+      setTimeout(()=>banner.classList.remove('show'), 2600);
+    }
+
+    document.addEventListener('submit', (e) => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('name-form')) e.preventDefault();
+    }, true);
+
+    helpBtnHeader.addEventListener('click', () => {
+      if (typeof helpDialog.showModal === 'function') helpDialog.showModal();
+      else alert('Click map (on land) or Locate me → enter your X handle → Add.');
+    });
+
+    /* ---------- Map ---------- */
+    const worldBounds = L.latLngBounds([-85, -180], [85, 180]);
+    const map = L.map('map', {
+      zoomControl: true,
+      maxBounds: worldBounds,
+      maxBoundsViscosity: 1.0
+    }).setView([20, 0], 2);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom: 19,
+      attribution:'&copy; OpenStreetMap contributors',
+      noWrap: true,
+      bounds: worldBounds
+    }).addTo(map);
+
+    /* ---------- Land mask ---------- */
+    async function loadLandGeometry(){
+      const landTopoUrl = 'https://unpkg.com/world-atlas@2/land-110m.json';
+      const res = await fetch(landTopoUrl);
+      if (!res.ok) throw new Error('Failed to fetch land topojson');
+      const topoData = await res.json();
+      return window.topojson.feature(topoData, topoData.objects.land);
+    }
+
+    function pointInLandGeometry(geom, latlng){
+      if (!geom) return false;
+      if (latlng.lat < -60) return false; // Antarctica guard
+      try{
+        const pt = window.turf.point([latlng.lng, latlng.lat]);
+        const feature = (geom.type === 'Feature') ? geom : { type:'Feature', properties:{}, geometry: geom };
+        return window.turf.booleanPointInPolygon(pt, feature, { ignoreBoundary:false });
+      }catch{ return false; }
+    }
+    const landDecisionCache = new Map();
+    async function isLandSmart(geom, latlng){
+      const key = `${Math.round(latlng.lat*10000)},${Math.round(latlng.lng*10000)}`;
+      if (landDecisionCache.has(key)) return landDecisionCache.get(key);
+      let ok = pointInLandGeometry(geom, latlng);
+      if (!ok) {
+        try {
+          const url = new URL('https://nominatim.openstreetmap.org/reverse');
+          url.searchParams.set('format','jsonv2');
+          url.searchParams.set('lat', latlng.lat);
+          url.searchParams.set('lon', latlng.lng);
+          url.searchParams.set('zoom','10');
+          url.searchParams.set('addressdetails','1');
+          const resp = await fetch(url.toString(), { headers: { 'Accept-Language': navigator.language || 'en' }});
+          const data = await resp.json();
+          const a = data?.address || {};
+          const text = (data?.display_name || '').toLowerCase();
+          const looksWater = /ocean|sea|gulf|bay|lake|reservoir|strait|channel/.test(text) ||
+                             /ocean|sea|gulf|bay|lake|reservoir|strait|channel/.test(
+                               Object.values(a).join(' ').toLowerCase()
+                             );
+          ok = !!a.country && !looksWater && latlng.lat > -60;
+        } catch { ok = false; }
+      }
+      landDecisionCache.set(key, ok);
+      return ok;
+    }
+
+    /* ---------- Reverse geocode + meta ---------- */
+    const reverseCache = new Map();
+    function cacheKey(ll){ return `${Math.round(ll.lat*10000)},${Math.round(ll.lng*10000)}`; }
+    async function getPlaceMeta(latlng){
+      const key = cacheKey(latlng);
+      if (reverseCache.has(key)) return reverseCache.get(key);
+
+      const url = new URL('https://nominatim.openstreetmap.org/reverse');
+      url.searchParams.set('format','jsonv2');
+      url.searchParams.set('lat', latlng.lat);
+      url.searchParams.set('lon', latlng.lng);
+      url.searchParams.set('zoom','14');
+      url.searchParams.set('addressdetails','1');
+
+      let cityLabel='this area', country='', country_code='', state='', continent='';
+      try{
+        const res = await fetch(url.toString(), { headers: { 'Accept-Language': navigator.language || 'en' }});
+        const data = await res.json();
+        const a = data.address || {};
+        cityLabel = a.city || a.town || a.village || a.municipality || a.suburb || a.hamlet || a.county || a.state || 'this area';
+        country = a.country || '';
+        country_code = (a.country_code || '').toLowerCase();
+        state = a.state || '';
+        continent = (a.continent || '').toLowerCase();
+      }catch{}
+
+      const meta = { cityLabel, country, country_code, state, continent };
+      reverseCache.set(key, meta);
+      return meta;
+    }
+
+    /* ---------- Image pools ---------- */
+    const STICKER_POOL = {
+      'alaska':        ['alaska/octo-alaska-1.png','alaska/octo-alaska-2.png'],
+      'argentina':     ['argentina/octo-argentina-1.png','argentina/octo-argentina-2.png'],
+      'australia':     ['australia/octo-asutralia-1.png','australia/octo-asutralia-2.png'],
+      'brazil':        ['brazil/octo-brazil-1.png','brazil/octo-brazil-2.png'],
+      'canada':        ['canada/octo-canada-1.png','canada/octo-canada-2.png'],
+      'china':         ['china/octo-china-1.png','china/octo-china-2.png'],
+      'colombia':      ['colombia/octo-colombia-1.png','colombia/octo-colombia-2.png'],
+      'egypt':         ['egypt/octo-egypt-1.png','egypt/octo-egypt-2.png'],
+      'france':        ['france/octo-france-1.png','france/octo-france-2.png'],
+      'germany':       ['germany/octo-germany-1.png','germany/octo-germany-2.png'],
+      'india':         ['india/octo-india-1.png','india/octo-india-2.png'],
+      'indonesia':     ['indonesia/octo-indonesia-1.png','indonesia/octo-indonesia-2.png'],
+      'italy':         ['italy/octo-italy-1.png','italy/octo-italy-2.png'],
+      'japan':         ['japan/octo-japan-1.png','japan/octo-japan-2.png'],
+      'korea':         ['korea/korea-octo-1.png','korea/korea-octo-2.png'],
+      'mexico':        ['mexico/octo-mexico-1.png','mexico/octo-mexico-2.png'],
+      'pakistan':      ['pakistan/octo-pakistan-1.png','pakistan/octo-pakistan-2.png'],
+      'russia':        ['russia/octo-russia-1.png','russia/octo-russia-2.png'],
+      'saudi':         ['saudi/octo-saudi-1.png','saudi/octo-saudi-2.png'],
+      'uae':           ['uae/octo-uae-1.png','uae/octo-uae-2.png'],
+      'usa':           ['usa/octo-usa-1.png','usa/octo-usa-2.png'],
+
+      'africa':        ['africa/africa-octo-1.png','africa/africa-octo-2.png','africa/africa-octo-3.png','africa/africa-octo-4.png'],
+      'asia':          ['asia/octo-asia-1.png','asia/octo-asia-2.png'],
+      'europe':        ['europe/octo-europe-1.png','europe/octo-europe-2.png'],
+      'north-america': ['north-america/octo-north-america-1.png','north-america/octo-north-america-2.png'],
+      'south-america': ['south-america/octo-south-america-1.png','south-america/octo-south-america-2.png'],
+    };
+
+    /* ----- Helpers to ensure Africa never falls back to Europe incorrectly ----- */
+
+    // ISO-3166-1 alpha2 codes for African countries (lowercase)
+    const AFRICAN_ISO2 = new Set([
+      'dz','ao','bj','bw','bf','bi','cm','cv','cf','td','km','cg','cd','ci','dj','eg','gq','er','sz','et','ga','gm','gh','gn','gw','ke','ls','lr','ly','mg','mw','ml','mr','mu','ma','mz','na','ne','ng','rw','st','sn','sc','sl','so','za','ss','sd','tz','tg','tn','ug','eh','zm','zw','yt','re' // includes territories like YT/RE
+    ]);
+
+    function codeIsAfrican(cc){ return AFRICAN_ISO2.has((cc||'').toLowerCase()); }
+
+    // Coarse bounding boxes to infer continent if geocoder omits it
+    function inferContinentFromCoords(latlng){
+      const {lat, lng} = latlng;
+      // Africa (broad, includes Madagascar and nearby islands)
+      if (lat>=-40 && lat<=38 && lng>=-25 && lng<=60) return 'africa';
+      // South America
+      if (lat>=-55 && lat<=15 && lng>=-82 && lng<=-34) return 'south-america';
+      // North America
+      if (lat>=7 && lat<=85 && lng>=-170 && lng<=-50) return 'north-america';
+      // Europe
+      if (lat>=35 && lat<=72 && lng>=-31 && lng<=60) return 'europe';
+      // Asia
+      if (lat>=0 && lat<=72 && lng>=25 && lng<=180) return 'asia';
+      // Oceania → use Australia set
+      if (lat>=-50 && lat<=0 && lng>=110 && lng<=180) return 'australia';
+      return null;
+    }
+
+    // Country code/name → specific country set (kept from your spec)
+    function countryToKey(cc, countryName, stateName){
+      const c = (cc||'').toLowerCase();
+      if (c === 'us' && /alaska/i.test(stateName||'')) return 'alaska';
+
+      switch (c){
+        case 'ar': return 'argentina';
+        case 'au': return 'australia';
+        case 'br': return 'brazil';
+        case 'ca': return 'canada';
+        case 'cn': return 'china';
+        case 'co': return 'colombia';
+        case 'eg': return 'egypt';
+        case 'fr': return 'france';
+        case 'de': return 'germany';
+        case 'in': return 'india';
+        case 'id': return 'indonesia';
+        case 'it': return 'italy';
+        case 'jp': return 'japan';
+        case 'kr': // South Korea
+        case 'kp': // North Korea
+          return 'korea';
+        case 'mx': return 'mexico';
+        case 'pk': return 'pakistan';
+        case 'ru': return 'russia';
+        case 'sa': return 'saudi';
+        case 'ae': return 'uae';
+        case 'us': return 'usa';
+        default:
+          const n = (countryName||'').toLowerCase();
+          if (n.includes('united states')) return 'usa';
+          if (n.includes('korea')) return 'korea';
+          if (n.includes('saudi')) return 'saudi';
+          if (n.includes('united arab emirates')) return 'uae';
+          if (n.includes('australia')) return 'australia';
+          if (n.includes('canada')) return 'canada';
+          if (n.includes('india')) return 'india';
+          return null;
+      }
+    }
+
+    function continentToKey(continent){
+      const s = (contintentStr => (contintentStr||'').toLowerCase())(continent);
+      if (s.includes('africa')) return 'africa';
+      if (s.includes('asia')) return 'asia';
+      if (s.includes('europe')) return 'europe';
+      if (s.includes('north america')) return 'north-america';
+      if (s.includes('south america')) return 'south-america';
+      if (s.includes('oceania') || s.includes('australia')) return 'australia';
+      return null;
+    }
+
+    function randPick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+    async function chooseStickerForLatLng(latlng){
+      const meta = await getPlaceMeta(latlng);
+
+      // 1) Country-specific set (exact match)
+      let key = countryToKey(meta.country_code, meta.country, meta.state);
+
+      // 2) If no country set, and the ISO2 is African → use Africa pool immediately
+      if (!key && codeIsAfrican(meta.country_code)) key = 'africa';
+
+      // 3) Otherwise try continent from geocoder
+      if (!key) key = continentToKey(meta.continent);
+
+      // 4) Still unknown? Infer by coordinates (keeps Africa correct even if geocoder is sparse)
+      if (!key) key = inferContinentFromCoords(latlng);
+
+      // 5) Final safety: default to Africa (instead of Europe) if still missing
+      if (!key || !STICKER_POOL[key]) key = 'africa';
+
+      const path = randPick(STICKER_POOL[key]);
+      return { path, meta };
+    }
+
+    /* ---------- X handle utilities ---------- */
+    function extractHandle(raw){
+      if (!raw) return null;
+      let h = String(raw).trim();
+      h = h.replace(/^https?:\/\/(www\.)?x\.com\//i,'');
+      h = h.replace(/^@/,'');
+      h = h.split(/[/?#]/)[0];
+      if (!/^[A-Za-z0-9_]{1,30}$/.test(h)) return null;
+      return h;
+    }
+
+    /* ---------- Marker helpers ---------- */
+    function stickerIcon(src) {
+      return L.divIcon({
+        className: 'sticker-wrapper',
+        html: `<img class="sticker-img" src="${src}" alt="">`,
+        iconSize: [56, 56],
+        iconAnchor: [28, 56]
+      });
+    }
+
+    function setMarkerLabel(marker, text){
+      marker.bindPopup(`<div>${text}</div>`, {
+        closeButton:false,
+        autoClose:true,
+        className:'name-popup'
+      });
+    }
+    function setMarkerLabelWithLink(marker, handle, cityText){
+      const url = `https://x.com/${encodeURIComponent(handle)}`;
+      const html = `<a class="name-link" href="${url}" target="_blank" rel="noopener noreferrer">${handle} octo lives in ${cityText}</a>`;
+      marker.bindPopup(`<div>${html}</div>`, {
+        closeButton:false,
+        autoClose:true,
+        className:'name-popup'
+      });
+    }
+
+    const markers = new Set();
+    const serverMarkers = new Map();
+
+    function createStickerMarker(latlng, openPopup = true) {
+      const m = L.marker(latlng, { draggable:true, icon:stickerIcon('octo.svg') }).addTo(map);
+      markers.add(m);
+
+      // Pre-pick sticker for the coordinates
+      chooseStickerForLatLng(latlng).then(({path, meta}) => {
+        m.__candidateSticker = path;
+        m.__candidateMeta = meta;
+        m.setIcon(stickerIcon(path));
+      }).catch(()=>{});
+
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const popupHtml = `
+        <form class="name-form" data-id="${id}" style="display:flex;gap:6px;align-items:center;background:#0f1628;border:1px solid #223150;border-radius:12px;padding:6px;">
+          <input placeholder="Enter your X handle" required maxlength="40"
+                 style="background:transparent;border:0;outline:0;color:#e7eefc;padding:6px 8px;width:260px">
+          <button type="submit" class="add" style="background:#1b2a4b;color:#e7eefc;border:1px solid #2c3b64;border-radius:10px;padding:6px 12px;font-weight:700;cursor:pointer">Add</button>
+        </form>
+      `;
+      m.bindPopup(popupHtml, { closeOnClick:false, autoClose:false });
+
+      m.on('popupopen', (ev) => {
+        const popupEl = ev.popup.getElement();
+        if (popupEl) {
+          L.DomEvent.disableClickPropagation(popupEl);
+          L.DomEvent.disableScrollPropagation(popupEl);
+        }
+        const form = popupEl.querySelector(`form[data-id="${id}"]`);
+        if (!form || form.dataset.bound === '1') return;
+        form.dataset.bound = '1';
+
+        const input = form.querySelector('input');
+        const addBtn = form.querySelector('.add');
+        if (input) input.focus();
+
+        let busy = false;
+        const addAction = async () => {
+          if (busy) return; busy = true;
+
+          if (alreadySaved && !replacing) { showBanner("You already added your location from this device 💙"); busy = false; return; }
+
+          const raw = (input.value || '').trim(); if (!raw) { busy = false; return; }
+          const parsedHandle = extractHandle(raw);
+          if (!parsedHandle) { showBanner("Please enter a valid X handle."); busy = false; return; }
+
+          // Ensure pre-picked sticker & meta
+          let meta = m.__candidateMeta;
+          let stickerPath = m.__candidateSticker;
+          if (!meta || !stickerPath) {
+            try {
+              const picked = await chooseStickerForLatLng(m.getLatLng());
+              meta = picked.meta; stickerPath = picked.path;
+              m.setIcon(stickerIcon(stickerPath));
+            } catch {
+              // ultimate fallback: Africa set (so we never default to Europe for unknowns)
+              stickerPath = randPick(STICKER_POOL['africa']);
+              meta = { cityLabel: 'this area' };
+            }
+          }
+
+          // Close input popup; set label with link
+          m.closePopup();
+          setMarkerLabelWithLink(m, parsedHandle, meta.cityLabel);
+
+          // Save to Firestore
+          const { lat, lng } = m.getLatLng();
+          try {
+            await saveMarkerToFirestore({
+              handle: parsedHandle,
+              name: parsedHandle,
+              city: meta.cityLabel,
+              lat, lng,
+              sticker: stickerPath
+            });
+            map.removeLayer(m); markers.delete(m);
+          } catch (e) {
+            console.error('Save failed:', e);
+            showBanner("Save failed: " + (e?.message || "Unknown error"));
+            map.removeLayer(m); markers.delete(m);
+          } finally {
+            replacing = false;
+            busy = false;
+          }
+        };
+
+        form.addEventListener('submit', (e) => { e.preventDefault(); addAction(); });
+        addBtn.addEventListener('click', (e) => { e.preventDefault(); addAction(); });
+      });
+
+      if (openPopup) m.openPopup();
+
+      m.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation(); });
+
+      return m;
+    }
+
+    /* ---------- Firebase (one pin per device; replaceable) ---------- */
+    const app  = initializeApp(firebaseConfig);
+    const db   = getFirestore(app);
+    const auth = getAuth(app);
+
+    let myUid = null;
+    let alreadySaved = false;
+    let replacing = false;
+    let isAdmin = false;
+
+    function drawServerMarker(id, rec){
+      const existing = serverMarkers.get(id);
+      if (existing) { map.removeLayer(existing); serverMarkers.delete(id); }
+
+      const iconPath = rec.sticker || randPick(STICKER_POOL['africa']); // prefer Africa as safe default
+      const m = L.marker([rec.lat, rec.lng], { draggable:false, icon:stickerIcon(iconPath) }).addTo(map);
+
+      if (rec.handle) {
+        setMarkerLabelWithLink(m, rec.handle, rec.city || 'this area');
+      } else if (rec.name) {
+        setMarkerLabel(m, `${rec.name} octo lives in ${rec.city || 'this area'}`);
+      } else {
+        setMarkerLabel(m, `octo lives in ${rec.city || 'this area'}`);
+      }
+      serverMarkers.set(id, m);
+    }
+
+    async function saveMarkerToFirestore({ handle, name, city, lat, lng, sticker }){
+      if (!myUid) throw new Error('not signed in yet');
+      await setDoc(doc(db, 'markers', myUid), {
+        handle, name, city, lat, lng, sticker, createdAt: serverTimestamp()
+      }, { merge: true });
+      alreadySaved = true;
+    }
+    window.saveMarkerToFirestore = saveMarkerToFirestore;
+
+    function updateAdminUI() {
+      wipeBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+      adminBtn.textContent = isAdmin ? 'Admin (signed in)' : 'Admin';
+    }
+
+    async function refreshMyStatus() {
+      if (!myUid) return;
+      const myDoc = await getDoc(doc(db, 'markers', myUid));
+      alreadySaved = myDoc.exists();
+    }
+
+    // anon sign-in and live stream
+    signInAnonymously(auth);
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      myUid = user.uid;
+
+      isAdmin = (auth.currentUser && auth.currentUser.uid === ADMIN_UID);
+      updateAdminUI();
+
+      await refreshMyStatus();
+
+      onSnapshot(collection(db, 'markers'), (snap) => {
+        snap.docChanges().forEach(chg => {
+          const id = chg.doc.id;
+          if (chg.type === 'added' || chg.type === 'modified') {
+            drawServerMarker(id, chg.doc.data());
+            if (id === myUid) alreadySaved = true;
+          } else if (chg.type === 'removed') {
+            const m = serverMarkers.get(id);
+            if (m) { map.removeLayer(m); serverMarkers.delete(id); }
+            if (id === myUid) alreadySaved = false;
+          }
+        });
+      });
+    });
+
+    /* ---------- Enable interactions after land data loads ---------- */
+    (async () => {
+      try {
+        const landGeom = await loadLandGeometry();
+        loading.classList.add('hidden');
+
+        // Geocoder
+        L.Control.geocoder({ defaultMarkGeocode:false, placeholder:'Search an address…' })
+          .on('markgeocode', async (e) => {
+            const c = e.geocode.center, b = e.geocode.bbox;
+            if (b) map.fitBounds(b.pad(0.02)); else map.setView(c, 17);
+            if (alreadySaved && !replacing) { showBanner("You already added your location from this device 💙"); return; }
+            if (!(await isLandSmart(landGeom, c))) { showBanner("Please click on land (not ocean/Antarctica)"); return; }
+            createStickerMarker(c, true);
+          }).addTo(map);
+
+        // Map click
+        map.on('click', async (e) => {
+          if (alreadySaved && !replacing) { showBanner("You already added your location from this device 💙"); return; }
+          if (!(await isLandSmart(landGeom, e.latlng))) { showBanner("Please click on land (not ocean/Antarctica)"); return; }
+          createStickerMarker(e.latlng, true);
+        });
+
+        // Locate me
+        locateBtn.addEventListener('click', () => {
+          if (!navigator.geolocation) return alert('Geolocation not supported.');
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
+            map.setView(ll, 16);
+            if (alreadySaved && !replacing) { showBanner("You already added your location from this device 💙"); return; }
+            if (!(await isLandSmart(landGeom, ll))) { showBanner("Your location seems over water/Antarctica—place on land."); return; }
+            createStickerMarker(ll, true);
+          }, (err) => alert('Unable to get your location: ' + (err?.message || 'Unknown error')),
+          { enableHighAccuracy:true, timeout:10000, maximumAge:30000 });
+        });
+
+      } catch (err) {
+        console.error('Land load failed:', err);
+        loading.textContent = "Couldn't load land data. Please refresh.";
+      }
+    })();
+
+    // Local reset and replace mode
+    resetBtn.addEventListener('click', () => {
+      markers.forEach(m => map.removeLayer(m));
+      markers.clear();
+      replacing = false;
+    });
+
+    replaceBtn.addEventListener('click', () => {
+      replacing = true;
+      showBanner("Replace mode: click the map (on land), enter your X handle, then Add.");
+    });
+
+    // Admin sign-in/out & global reset
+    function updateAdminStateAfterAuth() {
+      isAdmin = (auth.currentUser && auth.currentUser.uid === ADMIN_UID);
+      updateAdminUI();
+    }
+
+    adminBtn.addEventListener('click', async () => {
+      try {
+        if (isAdmin) {
+          await signOut(auth);
+          updateAdminStateAfterAuth();
+          showBanner("Signed out admin.");
+          await signInAnonymously(auth);
+          return;
+        }
+        const email = prompt("Admin email:"); if (!email) return;
+        const password = prompt("Admin password:"); if (!password) return;
+
+        await signInWithEmailAndPassword(auth, email, password);
+        updateAdminStateAfterAuth();
+        showBanner(isAdmin ? "Admin signed in." : "Signed in, but this user is not the configured admin UID.");
+      } catch (e) {
+        console.error(e);
+        showBanner("Admin sign-in failed.");
+      }
+    });
+
+    wipeBtn.addEventListener('click', async () => {
+      if (!isAdmin) return showBanner("Admin only.");
+      if (!confirm("Delete ALL pins for everyone? This cannot be undone.")) return;
+
+      try {
+        const snap = await getDocs(collection(db, 'markers'));
+        let batch = writeBatch(db);
+        let count = 0;
+        snap.forEach((d) => {
+          batch.delete(d.ref);
+          count++;
+          if (count % 400 === 0) { batch.commit(); batch = writeBatch(db); }
+        });
+        await batch.commit();
+        showBanner("All pins deleted.");
+        alreadySaved = false;
+      } catch (e) {
+        console.error(e);
+        showBanner("Global reset failed: " + (e?.message || "Unknown error"));
+      }
+    });
+  </script>
+</body>
+</html>
